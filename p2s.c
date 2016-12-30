@@ -75,6 +75,7 @@ void *recv_raw_packets(void *argp) {
 	while (1) {
 		pthread_mutex_lock(&ppbuf->mutex);
 		printf("avail buff = %d\n", pbuf_avail(ppbuf));
+		// check whether there is engough buffer space
 		if (pbuf_avail(ppbuf) < MAX_PKT_SIZE) {
 			printf("not enough buffer space\n");
 			pthread_cond_wait(&ppbuf->cond_recv, &ppbuf->mutex);
@@ -162,6 +163,7 @@ void *mptcp_send_data(void *argp) {
 	while (1) {
 		send_buff = (char*) malloc(sizeof(char) * ppbuf->n);
 		pthread_mutex_lock(&ppbuf->mutex);
+		// Not send packet until the received data size reaches the batch size
 		while (ppbuf->len < ppbuf->send_batch_size) {
 			clock_gettime(CLOCK_REALTIME, &ctime);
 			timeout.tv_sec = ctime.tv_sec + intvl.tv_sec;
@@ -189,6 +191,7 @@ void *mptcp_send_data(void *argp) {
 		pthread_cond_signal(&ppbuf->cond_recv);
 		pthread_mutex_unlock(&ppbuf->mutex);
 		idx = 0;
+		// send the data into network
 		while (idx < buflen) {
 			iph = IPHDR(send_buff);
 			dstaddr.sin_family = AF_INET;
