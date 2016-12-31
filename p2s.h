@@ -31,7 +31,7 @@ typedef struct {
 	struct timespec batch_timeout;
 } pthread_arg_t;
 
-inline void init_pbuf(pbuf_t *pp, int n) {
+static inline void init_pbuf(pbuf_t *pp, int n) {
 	pp->buff = (char*) malloc(sizeof(char) * n);
 	pp->buff[0] = '\0';
 	pp->n = n;
@@ -41,14 +41,14 @@ inline void init_pbuf(pbuf_t *pp, int n) {
 	pthread_cond_init(&pp->cond_recv, NULL);
 }
 
-inline void free_pbuf(pbuf_t *pp) {
+static inline void free_pbuf(pbuf_t *pp) {
 	free(pp->buff);
 	pp = NULL;
 	pthread_cond_destroy(&pp->cond_send);
 	pthread_cond_destroy(&pp->cond_recv);
 }
 
-inline int pbuf_avail(pbuf_t *pp) {
+static inline int pbuf_avail(pbuf_t *pp) {
 	return pp->n - pp->len;
 }
 
