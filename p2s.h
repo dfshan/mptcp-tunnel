@@ -29,7 +29,9 @@ typedef struct {
 	char *recv_interface;
 	char *send_interface;
 	struct timespec batch_timeout;
-} pthread_arg_t;
+	char *server_addr;
+	char *server_port;
+} p2s_arg_t;
 
 static inline void init_pbuf(pbuf_t *pp, int n) {
 	pp->buff = (char*) malloc(sizeof(char) * n);

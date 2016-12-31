@@ -20,16 +20,17 @@
 #include <linux/if_ether.h>
 
 #include "p2s.h"
+#include "sock.h"
 
 int count = 0;
 
 void *recv_raw_packets(void *argp) {
 	int sockfd;
-	struct ifreq ifr;
+	struct ifreq ifr_idx, ifr_saddr, ifr_baddr;
 	ssize_t frame_len;
 	unsigned ip_pkt_len;
 	int sockopt = 1;
-	pthread_arg_t *args = (pthread_arg_t *) argp;
+	p2s_arg_t *args = (p2s_arg_t *) argp;
 	pbuf_t *ppbuf = args->ppbuf;
 	char *interface = args->recv_interface;
 	char recv_buff[MAX_PKT_SIZE];
@@ -41,13 +42,27 @@ void *recv_raw_packets(void *argp) {
 		perror ("socket() failed to get socket descriptor for using ioctl() ");
 		exit(EXIT_FAILURE);
 	}
+	memset (&ifr_idx, 0, sizeof (ifr_idx));
+	memset (&ifr_saddr, 0, sizeof (ifr_saddr));
+	memset (&ifr_baddr, 0, sizeof (ifr_baddr));
+	snprintf (ifr_idx.ifr_name, sizeof (ifr_idx.ifr_name), "%s", interface);
+	snprintf (ifr_saddr.ifr_name, sizeof (ifr_saddr.ifr_name), "%s", interface);
+	snprintf (ifr_baddr.ifr_name, sizeof (ifr_baddr.ifr_name), "%s", interface);
 	// Use ioctl() to look up interface index which we will use to
-	// bind socket descriptor sd to specified interface with setsockopt() since
+	// bind socket descriptor sockfd to specified interface with setsockopt() since
 	// none of the other arguments of sendto() specify which interface to use.
-	memset (&ifr, 0, sizeof (ifr));
-	snprintf (ifr.ifr_name, sizeof (ifr.ifr_name), "%s", interface);
-	if (ioctl (sockfd, SIOCGIFINDEX, &ifr) < 0) {
+	if (ioctl (sockfd, SIOCGIFINDEX, &ifr_idx) < 0) {
 	  perror ("ioctl() failed to find interface ");
+	  exit(0);
+	}
+	// get ip address of the interface
+	if (ioctl (sockfd, SIOCGIFADDR, &ifr_saddr) < 0) {
+	  perror ("ioctl() failed to get ip address of this interface ");
+	  exit(0);
+	}
+	// get broadcast address of the interface
+	if (ioctl (sockfd, SIOCGIFBRDADDR, &ifr_baddr) < 0) {
+	  perror ("ioctl() failed to get ip address of this interface ");
 	  exit(0);
 	}
 	close (sockfd);
@@ -66,7 +81,7 @@ void *recv_raw_packets(void *argp) {
 	}
 
 	// Bind socket to interface index.
-	if (setsockopt (sockfd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof (ifr)) < 0) {
+	if (setsockopt (sockfd, SOL_SOCKET, SO_BINDTODEVICE, &ifr_idx, sizeof (ifr_idx)) < 0) {
 		perror ("setsockopt() failed to bind to interface ");
 		exit (EXIT_FAILURE);
 	}
@@ -74,7 +89,6 @@ void *recv_raw_packets(void *argp) {
 
 	while (1) {
 		pthread_mutex_lock(&ppbuf->mutex);
-		printf("avail buff = %d\n", pbuf_avail(ppbuf));
 		// check whether there is engough buffer space
 		if (pbuf_avail(ppbuf) < MAX_PKT_SIZE) {
 			printf("not enough buffer space\n");
@@ -90,6 +104,15 @@ void *recv_raw_packets(void *argp) {
 			continue;
 		}
 		iph = IPHDR(recv_buff + ETH_HLEN);
+		printf("%x\n", iph->daddr);
+		// check whether the detination is to its self
+		if (iph->daddr == ((struct sockaddr_in*) &ifr_saddr.ifr_addr)->sin_addr.s_addr) {
+			continue;
+		} else if (iph->daddr == ((struct sockaddr_in*) &ifr_baddr.ifr_broadaddr)->sin_addr.s_addr) {
+			continue;
+		} else if (iph->daddr == 0xffffff) {
+			continue;
+		}
 		ip_pkt_len = ntohs(iph->tot_len);
 		if (ip_pkt_len < frame_len - ETH_HLEN) {
 			fprintf(
@@ -117,21 +140,20 @@ out:
 }
 
 void *mptcp_send_data(void *argp) {
-	pthread_arg_t *args = (pthread_arg_t *) argp;
+	p2s_arg_t *args = (p2s_arg_t *) argp;
 	pbuf_t *ppbuf = args->ppbuf;
 	char *interface = args->send_interface;
 	struct timespec timeout, ctime, intvl = args->batch_timeout;
-	int ret, sockfd, idx, buflen, on = 1, sent_size;
-	struct iphdr *iph;
+	char *dstaddr = args->server_addr;
+	char *dstport = args->server_port;
+	int ret, sockfd, sent_out, left_size, total_size;
 	struct ifreq ifr;
-	struct sockaddr_in dstaddr;
 	char *send_buff = NULL;
 	// Submit request for a socket descriptor to look up interface.
 	if ((sockfd = socket (AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
 		perror ("socket() failed to get socket descriptor for using ioctl() ");
 		exit (EXIT_FAILURE);
 	}
-
 	// Use ioctl() to look up interface index which we will use to
 	// bind socket descriptor sockfd to specified interface with setsockopt() since
 	// none of the other arguments of sendto() specify which interface to use.
@@ -143,14 +165,8 @@ void *mptcp_send_data(void *argp) {
 	}
 	close (sockfd);
 	// Submit request for a raw socket descriptor.
-	if ((sockfd = socket (AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
-		perror ("socket() failed ");
-		exit (EXIT_FAILURE);
-	}
-
-	// Set flag so socket expects us to provide IPv4 header.
-	if (setsockopt (sockfd , IPPROTO_IP, IP_HDRINCL, &on, sizeof (on)) < 0) {
-		perror ("setsockopt() failed to set IP_HDRINCL ");
+	if ((sockfd = open_clientfd(dstaddr, dstport)) < 0) {
+		fprintf(stderr, "open clientfd error: %s\n", strerror(errno));
 		exit (EXIT_FAILURE);
 	}
 
@@ -186,6 +202,111 @@ void *mptcp_send_data(void *argp) {
 		}
 		/* copy data to send buffer */
 		memcpy(send_buff, ppbuf->buff, ppbuf->len);
+		left_size = total_size = ppbuf->len;
+		ppbuf->len = 0;
+		pthread_cond_signal(&ppbuf->cond_recv);
+		pthread_mutex_unlock(&ppbuf->mutex);
+		// send the data into network
+		while (left_size > 0) {
+			sent_out = send(sockfd, send_buff, left_size, 0);
+			if (sent_out < 0) {
+				perror("send() failed");
+				goto out;
+			}
+			printf("send %dB data!\n", sent_out);
+			left_size -= sent_out;
+		}
+	}
+out:
+	close (sockfd);
+	free(send_buff);
+	return NULL;
+}
+
+void *mptcp_send_data_bak(void *argp) {
+	p2s_arg_t *args = (p2s_arg_t *) argp;
+	pbuf_t *ppbuf = args->ppbuf;
+	char *interface = args->send_interface;
+	struct timespec timeout, ctime, intvl = args->batch_timeout;
+	int ret, sockfd, idx, buflen, on = 1, sent_size;
+	struct iphdr *iph;
+	struct ifreq ifr_idx, ifr_saddr, ifr_baddr;
+	struct sockaddr_in dstaddr;
+	char *send_buff = NULL;
+	// Submit request for a socket descriptor to look up interface.
+	if ((sockfd = socket (AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
+		perror ("socket() failed to get socket descriptor for using ioctl() ");
+		exit (EXIT_FAILURE);
+	}
+
+	// Use ioctl() to look up interface index which we will use to
+	// bind socket descriptor sockfd to specified interface with setsockopt() since
+	// none of the other arguments of sendto() specify which interface to use.
+	memset (&ifr_idx, 0, sizeof (ifr_idx));
+	memset (&ifr_saddr, 0, sizeof (ifr_saddr));
+	memset (&ifr_baddr, 0, sizeof (ifr_baddr));
+	snprintf (ifr_idx.ifr_name, sizeof (ifr_idx.ifr_name), "%s", interface);
+	snprintf (ifr_saddr.ifr_name, sizeof (ifr_saddr.ifr_name), "%s", interface);
+	snprintf (ifr_baddr.ifr_name, sizeof (ifr_baddr.ifr_name), "%s", interface);
+	if (ioctl (sockfd, SIOCGIFINDEX, &ifr_idx) < 0) {
+		perror ("ioctl() failed to find interface ");
+		return NULL;
+	}
+	// get ip address of the interface
+	if (ioctl (sockfd, SIOCGIFADDR, &ifr_saddr) < 0) {
+	  perror ("ioctl() failed to get ip address of this interface ");
+	  exit(0);
+	}
+	// get broadcast address of the interface
+	if (ioctl (sockfd, SIOCGIFBRDADDR, &ifr_baddr) < 0) {
+	  perror ("ioctl() failed to get ip address of this interface ");
+	  exit(0);
+	}
+	close (sockfd);
+	// Submit request for a raw socket descriptor.
+	if ((sockfd = socket (AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
+		perror ("socket() failed ");
+		exit (EXIT_FAILURE);
+	}
+
+	// Set flag so socket expects us to provide IPv4 header.
+	if (setsockopt (sockfd , IPPROTO_IP, IP_HDRINCL, &on, sizeof (on)) < 0) {
+		perror ("setsockopt() failed to set IP_HDRINCL ");
+		exit (EXIT_FAILURE);
+	}
+
+	// Bind socket to interface index.
+	if (setsockopt (sockfd, SOL_SOCKET, SO_BINDTODEVICE, &ifr_idx, sizeof (ifr_idx)) < 0) {
+		perror ("setsockopt() failed to bind to interface ");
+		exit (EXIT_FAILURE);
+	}
+	printf ("Index for interface %s is %i\n", interface, ifr_idx.ifr_ifindex);
+	while (1) {
+		send_buff = (char*) malloc(sizeof(char) * ppbuf->n);
+		pthread_mutex_lock(&ppbuf->mutex);
+		// Not send packet until the received data size reaches the batch size
+		while (ppbuf->len < ppbuf->send_batch_size) {
+			clock_gettime(CLOCK_REALTIME, &ctime);
+			timeout.tv_sec = ctime.tv_sec + intvl.tv_sec;
+			timeout.tv_nsec = ctime.tv_nsec + intvl.tv_nsec;
+			ret = pthread_cond_timedwait(&ppbuf->cond_send, &ppbuf->mutex, &timeout);
+			if (ret == 0) {
+				printf("we can now send\n");
+				break;
+			} else if (ret == ETIMEDOUT) {
+				printf("TIMEOUT\n");
+				break;
+			} else if (ret == EINVAL) {
+				fprintf(
+					stderr, "Error when calling pthread_cond_timewait: %s\n",
+					strerror(ret)
+				);
+				pthread_mutex_unlock(&ppbuf->mutex);
+				goto out;
+			}
+		}
+		/* copy data to send buffer */
+		memcpy(send_buff, ppbuf->buff, ppbuf->len);
 		buflen = ppbuf->len;
 		ppbuf->len = 0;
 		pthread_cond_signal(&ppbuf->cond_recv);
@@ -194,6 +315,17 @@ void *mptcp_send_data(void *argp) {
 		// send the data into network
 		while (idx < buflen) {
 			iph = IPHDR(send_buff);
+			// check whether the detination is to its self
+			if (iph->daddr == ((struct sockaddr_in*) &ifr_saddr.ifr_addr)->sin_addr.s_addr) {
+				idx += ntohs(iph->tot_len);
+				continue;
+			} else if (iph->daddr == ((struct sockaddr_in*) &ifr_baddr.ifr_broadaddr)->sin_addr.s_addr) {
+				idx += ntohs(iph->tot_len);
+				continue;
+			} else if (iph->daddr == 0xffffff) {
+				idx += ntohs(iph->tot_len);
+				continue;
+			}
 			dstaddr.sin_family = AF_INET;
 			dstaddr.sin_addr.s_addr = iph->saddr;
 			iph->saddr = iph->daddr;
