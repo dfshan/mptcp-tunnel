@@ -1,0 +1,4 @@
+buffer_size=100000
+recv_batch_size=3000
+send_interface="enp0s25"
+server_port=9876

@@ -52,3 +52,4 @@ dkms.conf
 
 main
 *.swp
+*.cfg

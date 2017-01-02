@@ -1,0 +1,6 @@
+buffer_size=10000
+send_batch_size=10
+batch_timeout=1
+recv_interface="enp0s25"
+server_address=192.168.1.1
+server_port=5001
