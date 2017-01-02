@@ -40,6 +40,11 @@ void *mptcp_recv_data(void *argp) {
 		fprintf(stderr, "accept() error: %s\n", strerror(errno));
 		goto out;
 	}
+	printf(
+		"Connection from host %s, port %d.\n",
+		inet_ntoa(client_addr.sin_addr),
+		ntohs(client_addr.sin_port)
+	);
 	while (1) {
 		recv_size = read(connfd, recv_buff, args->recv_batch_size);
 		if (recv_size < 0) {
