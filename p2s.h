@@ -7,7 +7,7 @@
 #define BUFF_SIZE 100000000
  #define PKT_MTU 1512
 // #define PKT_MTU 10
-#define MAX_PKT_SIZE 10240
+#define MAX_PKT_SIZE 3000
 
 #define IPHDR(buff)	((struct iphdr*) (buff))
 
@@ -18,7 +18,6 @@ typedef struct {
 	char *buff; /* Buffer to store packet */
 	int n; /* buffer size */
 	int len; /* buffer length in Bytes*/
-	int send_batch_size; /* batch size to send data */
 	pthread_mutex_t mutex; /* protect accesses to buf */
 	pthread_cond_t cond_send; /* condition to send */
 	pthread_cond_t cond_recv; /* condition to receive */
@@ -27,10 +26,10 @@ typedef struct {
 typedef struct {
 	pbuf_t *ppbuf;
 	char *recv_interface;
-	char *send_interface;
-	struct timespec batch_timeout;
 	char *server_addr;
 	char *server_port;
+	struct timespec batch_timeout;
+	int send_batch_size; /* batch size to send data */
 } p2s_arg_t;
 
 static inline void init_pbuf(pbuf_t *pp, int n) {
