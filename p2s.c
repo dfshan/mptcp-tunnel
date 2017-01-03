@@ -92,6 +92,8 @@ void *recv_raw_packets(void *argp) {
 		exit (EXIT_FAILURE);
 	}
 
+	printf ("Index for interface %s is %i\n", interface, ifr_idx.ifr_ifindex);
+
 	macaddr = (unsigned char *) ifr_maddr.ifr_hwaddr.sa_data;
 	printf(
 		"Mac : %x:%x:%x:%x:%x:%x\n",
