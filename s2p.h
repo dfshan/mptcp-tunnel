@@ -5,8 +5,9 @@
 #include <stdlib.h>
 
 #define BUFF_SIZE 100000000
- #define PKT_MTU 1512
+#define PKT_MTU 1512
 // #define PKT_MTU 10
+#define DEBUG 0
 
 #define IPHDR(buff)	((struct iphdr*) (buff))
 

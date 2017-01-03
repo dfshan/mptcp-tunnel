@@ -105,7 +105,9 @@ void *recv_raw_packets(void *argp) {
 		pthread_mutex_lock(&ppbuf->mutex);
 		// check whether there is engough buffer space
 		if (pbuf_avail(ppbuf) < PKT_MTU+50) {
+#if DEBUG == 1
 			printf("not enough buffer space\n");
+#endif
 			ret = pthread_cond_wait(&ppbuf->cond_recv, &ppbuf->mutex);
 			if (ret < 0) {
 				fprintf(
@@ -157,7 +159,9 @@ void *recv_raw_packets(void *argp) {
 		} else if (iph->daddr == 0x0100007f) {
 			continue;
 		}
+#if DEBUG == 1
 		printf("%x\n", iph->daddr);
+#endif
 		ip_pkt_len = ntohs(iph->tot_len);
 		if (ip_pkt_len < frame_len - ETH_HLEN) {
 			fprintf(
@@ -166,7 +170,9 @@ void *recv_raw_packets(void *argp) {
 			);
 			continue;
 		}
+#if DEBUG == 1
 		printf("recv: receive %uB data\n", ip_pkt_len);
+#endif
 		pthread_mutex_lock(&ppbuf->mutex);
 		memcpy(ppbuf->buff + ppbuf->len, recv_buff + ETH_HLEN, ip_pkt_len);
 		/*ip_pkt_len = 1;
@@ -253,7 +259,9 @@ void *mptcp_send_data(void *argp) {
 				perror("send() failed");
 				goto out;
 			}
+#if DEBUG == 1
 			printf("send %dB data!\n", sent_out);
+#endif
 			left_size -= sent_out;
 		}
 	}

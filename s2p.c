@@ -52,11 +52,15 @@ void *mptcp_recv_data(void *argp) {
 		} else if (recv_size == 0) {
 			break;
 		}
+#if DEBUG == 1
 		printf("receive %dB data\n", recv_size);
+#endif
 		// copy data to buffer
 		pthread_mutex_lock(&prbuf->mutex);
 		while (rbuf_avail(prbuf) < recv_size) {
+#if DEBUG == 1
 			printf("not enough buffer space\n");
+#endif
 			ret = pthread_cond_wait(&prbuf->cond_recv, &prbuf->mutex);
 			if (ret < 0) {
 				fprintf(
@@ -161,9 +165,13 @@ void *send_raw_packets(void *argp) {
 				pthread_mutex_unlock(&prbuf->mutex);
 				goto out;
 			}
+#if DEBUG == 1
 			printf("rbuf length: %d\n", rbuf_length(prbuf));
+#endif
 		}
+#if DEBUG == 1
 		printf("begin send\n");
+#endif
 		/* first, try to copy ip header */
 		for (i = 0; i < iph_len; i++) {
 			send_buff[i] = prbuf->buff[(prbuf->head + i)%prbuf->n];
@@ -222,7 +230,9 @@ void *send_raw_packets(void *argp) {
 			);
 			goto out;
 		}
+#if DEBUG == 1
 		printf("send %dB data!\n", sent_size);
+#endif
 	}
 out:
 	close(sockfd);

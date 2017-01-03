@@ -9,6 +9,8 @@
 // #define PKT_MTU 10
 #define MAX_PKT_SIZE 3000
 
+#define DEBUG 0
+
 #define IPHDR(buff)	((struct iphdr*) (buff))
 
 void *recv_raw_packets(void *argp);
