@@ -24,15 +24,17 @@
 
 void *recv_raw_packets(void *argp) {
 	int sockfd, ret;
-	struct ifreq ifr_idx, ifr_saddr, ifr_baddr;
+	struct ifreq ifr_idx, ifr_maddr, ifr_saddr, ifr_baddr;
 	ssize_t frame_len;
 	unsigned ip_pkt_len;
 	int sockopt = 1;
 	p2s_arg_t *args = (p2s_arg_t *) argp;
 	pbuf_t *ppbuf = args->ppbuf;
+	unsigned char *macaddr;
 	char *interface = args->recv_interface;
 	char recv_buff[MAX_PKT_SIZE];
 	struct iphdr *iph;
+	struct ethhdr *ethh;
 
 	// Submit request for a socket descriptor to look up interface.
 	sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
@@ -41,41 +43,47 @@ void *recv_raw_packets(void *argp) {
 		exit(EXIT_FAILURE);
 	}
 	memset (&ifr_idx, 0, sizeof (ifr_idx));
+	memset (&ifr_maddr, 0, sizeof (ifr_maddr));
 	memset (&ifr_saddr, 0, sizeof (ifr_saddr));
 	memset (&ifr_baddr, 0, sizeof (ifr_baddr));
 	snprintf (ifr_idx.ifr_name, sizeof (ifr_idx.ifr_name), "%s", interface);
+	snprintf (ifr_maddr.ifr_name, sizeof (ifr_maddr.ifr_name), "%s", interface);
 	snprintf (ifr_saddr.ifr_name, sizeof (ifr_saddr.ifr_name), "%s", interface);
 	snprintf (ifr_baddr.ifr_name, sizeof (ifr_baddr.ifr_name), "%s", interface);
 	// Use ioctl() to look up interface index which we will use to
 	// bind socket descriptor sockfd to specified interface with setsockopt() since
 	// none of the other arguments of sendto() specify which interface to use.
 	if (ioctl (sockfd, SIOCGIFINDEX, &ifr_idx) < 0) {
-	  perror ("ioctl() failed to find interface ");
-	  exit(0);
+		perror ("ioctl() failed to find interface ");
+		goto out;
+	}
+	// get mac address of the interface
+	if (ioctl (sockfd, SIOCGIFHWADDR, &ifr_maddr) < 0) {
+		perror ("ioctl() failed to get mac address of this interface ");
+		goto out;
 	}
 	// get ip address of the interface
 	if (ioctl (sockfd, SIOCGIFADDR, &ifr_saddr) < 0) {
-	  perror ("ioctl() failed to get ip address of this interface ");
-	  exit(0);
+		perror ("ioctl() failed to get ip address of this interface ");
+		goto out;
 	}
 	// get broadcast address of the interface
 	if (ioctl (sockfd, SIOCGIFBRDADDR, &ifr_baddr) < 0) {
-	  perror ("ioctl() failed to get ip address of this interface ");
-	  exit(0);
+		perror ("ioctl() failed to get broadcast address of this interface ");
+		goto out;
 	}
 	close (sockfd);
 
 	// ETH_P_IP means that we only need ip packet
 	sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
 	if (sockfd < 0) {
-		perror("create socket");
+		perror("cannot create socket");
 		exit(EXIT_FAILURE);
 	}
 
 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt)) < 0) {
-		perror("setsockopt REUSEADDR");
-		close(sockfd);
-		exit(0);
+		perror("cannot setsockopt REUSEADDR");
+		goto out;
 	}
 
 	// Bind socket to interface index.
@@ -83,6 +91,13 @@ void *recv_raw_packets(void *argp) {
 		perror ("setsockopt() failed to bind to interface ");
 		exit (EXIT_FAILURE);
 	}
+
+	macaddr = (unsigned char *) ifr_maddr.ifr_hwaddr.sa_data;
+	printf(
+		"Mac : %x:%x:%x:%x:%x:%x\n",
+		macaddr[0], macaddr[1], macaddr[2],
+		macaddr[3], macaddr[4], macaddr[5]
+	);
 
 	while (1) {
 		pthread_mutex_lock(&ppbuf->mutex);
@@ -103,9 +118,30 @@ void *recv_raw_packets(void *argp) {
 		frame_len = recv(sockfd, recv_buff, sizeof(recv_buff), 0);
 		if (frame_len < 0) {
 			perror("Receive packet.");
-			close(sockfd);
-			return NULL;
+			goto out;
 		} else if (frame_len == 0) {
+			continue;
+		} else if (frame_len < ETH_HLEN) {
+			fprintf(
+				stderr,
+				"Length of received packet (%ldB) less than eth header.\n",
+				frame_len
+			);
+			goto out;
+		} else if (frame_len < ETH_HLEN + sizeof(struct iphdr)) {
+			fprintf(
+				stderr,
+				"Length of received packet (%ldB) less than ip header.\n",
+				frame_len
+			);
+			goto out;
+		}
+		ethh = (struct ethhdr*) recv_buff;
+		/* skip those packet that are not detined to me */
+		if (ethh->h_dest[0] != macaddr[0] || ethh->h_dest[1] != macaddr[1] ||
+			ethh->h_dest[2] != macaddr[2] || ethh->h_dest[3] != macaddr[3] ||
+			ethh->h_dest[4] != macaddr[4] || ethh->h_dest[5] != macaddr[5]) {
+			// printf("Packet is not detined to me, skip it.\n");
 			continue;
 		}
 		iph = IPHDR(recv_buff + ETH_HLEN);

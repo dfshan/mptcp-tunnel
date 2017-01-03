@@ -1,4 +1,4 @@
-CFLAGS := -Wall -O1
+CFLAGS := -Wall
 OBJS := main.o p2s.o s2p.o sock.o
 INCLUDES := p2s.h s2p.h sock.h
 LIBS := -lpthread -lconfuse
