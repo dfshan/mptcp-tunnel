@@ -163,7 +163,7 @@ void *recv_raw_packets(void *argp) {
 		printf("%x\n", iph->daddr);
 #endif
 		ip_pkt_len = ntohs(iph->tot_len);
-		if (ip_pkt_len < frame_len - ETH_HLEN) {
+		if (ip_pkt_len > frame_len - ETH_HLEN) {
 			fprintf(
 				stderr, "Packet Lost. Capture %lu while packet size is %u\n",
 				frame_len - ETH_HLEN, ip_pkt_len
