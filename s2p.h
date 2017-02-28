@@ -5,7 +5,9 @@
 #include <stdlib.h>
 
 #define BUFF_SIZE 100000000
+#ifndef PKT_MTU
 #define PKT_MTU 1512
+#endif
 // #define PKT_MTU 10
 #define DEBUG 0
 

@@ -35,54 +35,59 @@ void *mptcp_recv_data(void *argp) {
 	}
 	sockfd = open_listenfd(atoi(args->server_port));
 	clientlen = sizeof(client_addr);
-	connfd = accept(sockfd, (struct sockaddr*) &client_addr, &clientlen);
-	if (connfd < 0) {
-		fprintf(stderr, "accept() error: %s\n", strerror(errno));
-		goto out;
-	}
-	printf(
-		"Connection from host %s, port %d.\n",
-		inet_ntoa(client_addr.sin_addr),
-		ntohs(client_addr.sin_port)
-	);
 	while (1) {
-		recv_size = read(connfd, recv_buff, args->recv_batch_size);
-		if (recv_size < 0) {
-			fprintf(stderr, "ERROR reading from socket: %s\n", strerror(errno));
-		} else if (recv_size == 0) {
-			break;
+		connfd = accept(sockfd, (struct sockaddr*) &client_addr, &clientlen);
+		if (connfd < 0) {
+			fprintf(stderr, "accept() error: %s\n", strerror(errno));
+			goto out;
 		}
+		printf(
+			"Connection from host %s, port %d.\n",
+			inet_ntoa(client_addr.sin_addr),
+			ntohs(client_addr.sin_port)
+		);
+		while (1) {
+			recv_size = read(connfd, recv_buff, args->recv_batch_size);
+			if (recv_size < 0) {
+				fprintf(stderr, "ERROR reading from socket: %s\n", strerror(errno));
+				goto out;
+			} else if (recv_size == 0) {
+				printf("Receive 0B data, close connection.\n");
+				close(connfd);
+				break;
+			}
 #if DEBUG == 1
-		printf("receive %dB data\n", recv_size);
+			printf("receive %dB data\n", recv_size);
 #endif
-		// copy data to buffer
-		pthread_mutex_lock(&prbuf->mutex);
-		while (rbuf_avail(prbuf) < recv_size) {
+			// copy data to buffer
+			pthread_mutex_lock(&prbuf->mutex);
+			while (rbuf_avail(prbuf) < recv_size) {
 #if DEBUG == 1
-			printf("not enough buffer space\n");
+				printf("not enough buffer space\n");
 #endif
-			ret = pthread_cond_wait(&prbuf->cond_recv, &prbuf->mutex);
+				ret = pthread_cond_wait(&prbuf->cond_recv, &prbuf->mutex);
+				if (ret < 0) {
+					fprintf(
+						stderr, "mptcp_recv_data: Error when calling pthread_cond_wait: %s\n",
+						strerror(ret)
+					);
+					pthread_mutex_unlock(&prbuf->mutex);
+					goto out;
+				}
+			}
+			rbuf_push(prbuf, recv_buff, recv_size);
+			ret = pthread_cond_signal(&prbuf->cond_send);
 			if (ret < 0) {
 				fprintf(
-					stderr, "mptcp_recv_data: Error when calling pthread_cond_wait: %s\n",
+					stderr, "recv_raw_data: Error when calling pthread_cond_signal: %s\n",
 					strerror(ret)
 				);
 				pthread_mutex_unlock(&prbuf->mutex);
 				goto out;
 			}
-		}
-		rbuf_push(prbuf, recv_buff, recv_size);
-		ret = pthread_cond_signal(&prbuf->cond_send);
-		if (ret < 0) {
-			fprintf(
-				stderr, "recv_raw_data: Error when calling pthread_cond_signal: %s\n",
-				strerror(ret)
-			);
 			pthread_mutex_unlock(&prbuf->mutex);
-			goto out;
+			usleep(1);
 		}
-		pthread_mutex_unlock(&prbuf->mutex);
-		usleep(1);
 	}
 out:
 	free(recv_buff);
@@ -99,7 +104,7 @@ void *send_raw_packets(void *argp) {
 	int iph_len = sizeof(struct iphdr);
 	struct ifreq ifr_idx, ifr_saddr, ifr_baddr;
 	struct sockaddr_in dstaddr;
-	char *send_buff = (char*) malloc(sizeof(char) * PKT_MTU);
+	char *send_buff = (char*) malloc(sizeof(char) * PKT_MTU * 2);
 	if (send_buff == NULL) {
 		fprintf(stderr, "unable to alloc memory for send buffer\n");
 		return NULL;
