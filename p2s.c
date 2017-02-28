@@ -174,11 +174,15 @@ void *recv_raw_packets(void *argp) {
 		printf("recv: receive %uB data\n", ip_pkt_len);
 #endif
 		pthread_mutex_lock(&ppbuf->mutex);
-		memcpy(ppbuf->buff + ppbuf->len, recv_buff + ETH_HLEN, ip_pkt_len);
+		//memcpy(ppbuf->buff + ppbuf->len, recv_buff + ETH_HLEN, ip_pkt_len);
+		if (pbuf_push(ppbuf, recv_buff + ETH_HLEN, ip_pkt_len) != ip_pkt_len) {
+			pthread_mutex_unlock(&ppbuf->mutex);
+			goto out;
+		}
 		/*ip_pkt_len = 1;
 		ppbuf->buff[ppbuf->len] = ppbuf->len;
 		printf("recv: receive data %u\n", (unsigned char) ppbuf->buff[ppbuf->len]);*/
-		ppbuf->len = ppbuf->len + ip_pkt_len;
+		// ppbuf->len = ppbuf->len + ip_pkt_len;
 		if (ppbuf->len >= args->send_batch_size) {
 			ret = pthread_cond_signal(&ppbuf->cond_send);
 			if (ret < 0) {
@@ -204,7 +208,7 @@ void *mptcp_send_data(void *argp) {
 	struct timespec timeout, ctime, intvl = args->batch_timeout;
 	char *dstaddr = args->server_addr;
 	char *dstport = args->server_port;
-	int ret, sockfd, sent_out, left_size, total_size;
+	int ret, sockfd, sent_out, left_size, total_size, n_copy, is_to;
 	char *send_buff = (char*) malloc(sizeof(char) * ppbuf->n);
 	if (send_buff == NULL) {
 		fprintf(stderr, "unable to alloc memory for send buffer\n");
@@ -222,11 +226,13 @@ void *mptcp_send_data(void *argp) {
 			clock_gettime(CLOCK_REALTIME, &ctime);
 			timeout.tv_sec = ctime.tv_sec + intvl.tv_sec;
 			timeout.tv_nsec = ctime.tv_nsec + intvl.tv_nsec;
+			is_to = 0;
 			ret = pthread_cond_timedwait(&ppbuf->cond_send, &ppbuf->mutex, &timeout);
 			if (ret == 0) {
 				//printf("we can now send\n");
 				break;
 			} else if (ret == ETIMEDOUT) {
+				is_to = 1;
 				//printf("TIMEOUT\n");
 				break;
 			} else {
@@ -239,9 +245,14 @@ void *mptcp_send_data(void *argp) {
 			}
 		}
 		/* copy data to send buffer */
-		memcpy(send_buff, ppbuf->buff, ppbuf->len);
-		left_size = total_size = ppbuf->len;
-		ppbuf->len = 0;
+		// memcpy(send_buff, ppbuf->buff, ppbuf->len);
+		if (!is_to && args->send_batch_size > 0) {
+			n_copy = (ppbuf->len/args->send_batch_size) * args->send_batch_size;
+		} else {
+			n_copy = ppbuf->len;
+		}
+		pbuf_pull(ppbuf, send_buff, n_copy);
+		left_size = total_size = n_copy;
 		ret = pthread_cond_signal(&ppbuf->cond_recv);
 		if (ret < 0) {
 			fprintf(
