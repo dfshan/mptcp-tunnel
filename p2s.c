@@ -215,9 +215,10 @@ void *mptcp_send_data(void *argp) {
 		return NULL;
 	}
 	// Submit request for a raw socket descriptor.
-	if ((sockfd = open_clientfd(dstaddr, dstport)) < 0) {
+	while ((sockfd = open_clientfd(dstaddr, dstport)) < 0) {
 		fprintf(stderr, "open clientfd error: %s\n", strerror(errno));
-		exit (EXIT_FAILURE);
+        sleep(1);
+		// exit (EXIT_FAILURE);
 	}
 	while (1) {
 		pthread_mutex_lock(&ppbuf->mutex);
