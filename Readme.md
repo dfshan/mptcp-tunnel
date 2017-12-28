@@ -3,6 +3,7 @@ This program is used to aggregate the bandwidth of multiple heterogeneous access
 
 # Requirements
 * libConfuse >= 2.7
+* Linux kernel w/ MPTCP
 
 # How to use
 1. Build the project:
@@ -17,5 +18,12 @@ See `p2s.cfg.example` and `s2p.cfg.example` as examples.
 3. Turn off offload features of NIC:
 
 ```shell
-ethtool -K $dev0 tso off gso off gro off lro off
+sudo ethtool -K $dev0 tso off gso off gro off lro off
+```
+
+4. Run `p2s` and `s2p` module:
+
+```shell
+sudo ./main p2s
+sudo ./main s2p
 ```
